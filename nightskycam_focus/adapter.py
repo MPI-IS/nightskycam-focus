@@ -131,12 +131,20 @@ def reset_adapter() -> None:
     time.sleep(_Wait.SHORT.value)
 
 
-@contextmanager
-def adapter():
+def init_adapter() -> None:
     reset_adapter()
     logging.debug("adapter: sending open command")
     _send_command(CommandType.OPEN, 0)
     logging.debug("adapter: open command sent")
+
+
+def idle_adapter() -> None:
+    _send_command(CommandType.IDLE, 0)
+
+
+@contextmanager
+def adapter():
+    init_adapter()
     try:
         yield
         error = None
@@ -144,7 +152,7 @@ def adapter():
         error = e
     finally:
         logging.debug("adapter: sending idle command")
-        _send_command(CommandType.IDLE, 0)
+        idle_adapter()
         logging.debug("adapter: idle command sent")
     if error:
         logging.error(error)
