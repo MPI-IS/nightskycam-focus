@@ -1,3 +1,4 @@
+from pathlib import Path
 import argparse
 import logging
 import sys
@@ -7,12 +8,15 @@ import cv2
 import numpy as np
 from camera_zwo_asi import ImageType
 from camera_zwo_asi.camera import Camera
+from camera_zwo_asi.image import Image
 
-from .adapter import adapter
+from .adapter import adapter, set_focus, set_aperture, Aperture
 from .focus import find_focus
 
 
-def _get_pixel_from_user(image: np.ndarray, resize: int = 4) -> Tuple[int, int]:
+def _get_pixel_from_user(
+    image: np.ndarray, resize: int = 4
+) -> Tuple[int, int]:
     down_sized_image = cv2.resize(
         image, (image.shape[1] // resize, image.shape[0] // resize)
     )
@@ -39,7 +43,7 @@ def _get_pixel_from_user(image: np.ndarray, resize: int = 4) -> Tuple[int, int]:
     return full_size_pixel
 
 
-def _get_full_image(exposure: int, gain: int, camera_index: int) -> np.ndarray:
+def _capture(exposure: int, gain: int, camera_index: int) -> Image:
     camera = Camera(camera_index)
     camera.set_control("Exposure", exposure)
     camera.set_control("Gain", gain)
@@ -47,7 +51,12 @@ def _get_full_image(exposure: int, gain: int, camera_index: int) -> np.ndarray:
     roi.bins = 1
     roi.type = ImageType.rgb24
     camera.set_roi(roi)
-    return camera.capture().get_image()
+    return camera.capture()
+
+
+def _get_full_image(exposure: int, gain: int, camera_index: int) -> np.ndarray:
+    image = _capture(exposure, gain, camera_index)
+    return image.get_image()
 
 
 def _add_border(img: np.array, thickness: int = 5, color=(255, 0, 0)):
@@ -68,9 +77,11 @@ def _add_border(img: np.array, thickness: int = 5, color=(255, 0, 0)):
     return bordered_img
 
 
-def _zwo_asi_focus():
+def _zwo_asi_focus_sweep():
 
-    parser = argparse.ArgumentParser(description="Focus sweep on zwo-asi camera")
+    parser = argparse.ArgumentParser(
+        description="Focus sweep on zwo-asi camera"
+    )
     parser.add_argument(
         "--camera_index",
         type=int,
@@ -91,10 +102,16 @@ def _zwo_asi_focus():
         help="Camera exposure (default: %(default)s)",
     )
     parser.add_argument(
-        "--gain", type=int, default=121, help="Camera gain (default: %(default)s)"
+        "--gain",
+        type=int,
+        default=121,
+        help="Camera gain (default: %(default)s)",
     )
     parser.add_argument(
-        "--step", type=int, default=20, help="Focus step size (default: %(default)s)"
+        "--step",
+        type=int,
+        default=20,
+        help="Focus step size (default: %(default)s)",
     )
     parser.add_argument("--show", action="store_true", help="Show the image")
     parser.add_argument(
@@ -115,16 +132,22 @@ def _zwo_asi_focus():
 
     # setting the logs
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG, format="focus sweep: %(message)s")
+        logging.basicConfig(
+            level=logging.DEBUG, format="focus sweep: %(message)s"
+        )
     elif args.silent:
         ...
     else:
-        logging.basicConfig(level=logging.INFO, format="focus sweep: %(message)s")
+        logging.basicConfig(
+            level=logging.INFO, format="focus sweep: %(message)s"
+        )
 
-    logging.info(f"capturing image (exposure: {args.exposure}, gain: {args.gain})")
+    logging.info(
+        f"capturing image (exposure: {args.exposure}, gain: {args.gain})"
+    )
     full_image = _get_full_image(args.exposure, args.gain, args.camera_index)
 
-    logging.info(f"prompting user for target pixel")
+    logging.info("prompting user for target pixel")
     pixel = _get_pixel_from_user(full_image)
 
     logging.info(
@@ -159,9 +182,9 @@ def _zwo_asi_focus():
         cv2.imwrite("focus.png", concatenated_images)
 
 
-def zwo_asi_focus():
+def zwo_asi_focus_sweep():
     try:
-        _zwo_asi_focus()
+        _zwo_asi_focus_sweep()
         sys.exit(0)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -169,6 +192,70 @@ def zwo_asi_focus():
 
 
 def zwo_asi_focus_test():
-    logging.basicConfig(level=logging.DEBUG, format="focus sweep: %(message)s")
+    logging.basicConfig(level=logging.DEBUG, format="focus test: %(message)s")
     with adapter():
         logging.info("adapter running")
+
+
+def _check_range(value: int, minimum: int = 350, maximum: int = 650) -> int:
+    """Check if the input value is an integer within the range 350 to 650."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value} is not a valid integer")
+    if ivalue < minimum or ivalue > maximum:
+        raise argparse.ArgumentTypeError(
+            f"{value} is an invalid value. Must be between {minimum} and {maximum}."
+        )
+    return ivalue
+
+
+def _valid_aperture(value: str) -> Aperture:
+    try:
+        return Aperture.get(value)
+    except KeyError:
+        raise argparse.ArgumentTypeError(
+            f"{value} is not a valid aperture. Valid apertures: MAX (open), V1, ..., V10, MIN (closed)"
+        )
+
+
+def zwo_asi_focus():
+    logging.basicConfig(level=logging.DEBUG, format="focus: %(message)s")
+    parser = argparse.ArgumentParser(
+        description="Focus change on zwo-asi camera"
+    )
+    parser.add_argument(
+        "focus",
+        type=_check_range,
+        help="desired focus. int between 350 and 650",
+    )
+    parser.add_argument(
+        "--aperture",
+        type=_valid_aperture,
+        help="desired aperture. MAX: open, MIN: close, V1 ... V10: intermediate values",
+        required=False,
+    )
+    parser.add_argument(
+        "--exposure",
+        type=int,
+        help="if set (microseconds), a picture will be taken and saved in the current directory",
+        required=False,
+    )
+    args = parser.parse_args()
+    with adapter():
+        logging.info(f"setting focus to {args.focus}")
+        set_focus(args.focus)
+        if args.aperture is not None:
+            logging.info(f"setting aperture to {args.aperture}")
+            set_aperture(args.aperture)
+    if args.exposure is None:
+        return
+    logging.info(f"taking picture with exposure {args.exposure}")
+    image = _capture(args.exposure, 121, 0)
+    if args.aperture:
+        filename = f"img_{args.focus}_{args.aperture}_{args.exposure}.tiff"
+    else:
+        filename = f"img_{args.focus}_{args.exposure}.tiff"
+    filepath = str(Path.cwd() / filename)
+    logging.info(f"saving image to {filepath}")
+    image.save(filepath)

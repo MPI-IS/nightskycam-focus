@@ -6,8 +6,9 @@ authors = ["Vincent Berenz <vberenz@tuebingen.mpg.de>"]
 packages = [{ include = "nightskycam_focus" }]
 
 [tool.poetry.scripts]
-zwo-asi-focus = 'nightskycam_focus.main:zwo_asi_focus'
+zwo-asi-focus-sweep = 'nightskycam_focus.main:zwo_asi_focus_sweep'
 zwo-asi-focus-test = 'nightskycam_focus.main:zwo_asi_focus_test'
+zwo-asi-focus = 'nightskycam_focus.main:zwo_asi_focus'
 
 [tool.poetry.dependencies]
 python = "^3.9"
