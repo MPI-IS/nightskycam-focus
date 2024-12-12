@@ -25,6 +25,31 @@ class CommandType(Enum):
     APERTURE = "A"
 
 
+class Aperture(Enum):
+    MAX = 441
+    V0 = 441
+    V1 = 512
+    V2 = 646
+    V3 = 706
+    V4 = 857
+    V5 = 926
+    V6 = 1110
+    V7 = 1159
+    V8 = 1271
+    V9 = 1347
+    V10 = 1468
+    V11 = 2303
+    MIN = 2303
+
+    @classmethod
+    def is_valid(cls, aperture: str) -> bool:
+        return aperture in cls.__members__
+
+    @classmethod
+    def get(cls, aperture: str) -> "Aperture":
+        return cls.__members__[aperture]
+
+
 PIN = NewType("PIN", int)
 SS_PIN = PIN(5)
 RESET_PIN = PIN(6)
@@ -79,7 +104,9 @@ _RESET_MESSAGE = _prepare_message(0x00, 0x00, 0x00)
 _ERROR_RESET = (2, 2, 2, 2)
 
 
-def _spi_send(spi: spidev.SpiDev, command_type: CommandType, value: int) -> None:
+def _spi_send(
+    spi: spidev.SpiDev, command_type: CommandType, value: int
+) -> None:
     logging.debug(f"command {command_type}: {value}")
     v1, v2 = divmod(value, 256)
     command = ord(command_type.value)
@@ -163,5 +190,6 @@ def set_focus(target_value: int) -> None:
     _send_command(CommandType.FOCUS, target_value)
 
 
-def set_aperture(target_value: int) -> None:
-    _send_command(CommandType.APERTURE, target_value)
+def set_aperture(target_value: Aperture) -> None:
+    value: int = target_value.value
+    _send_command(CommandType.APERTURE, value)
