@@ -4,7 +4,13 @@ from contextlib import contextmanager
 from enum import Enum
 from typing import Generator, List, NewType
 
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+
+    _GPIO_IMPORTED = True
+except RuntimeError:
+    _GPIO_IMPORTED = False
+
 import spidev
 
 MIN_FOCUS = 350
@@ -159,6 +165,8 @@ def reset_adapter() -> None:
 
 
 def init_adapter() -> None:
+    if not _GPIO_IMPORTED:
+        raise RuntimeError("GPIO module can be used only on Raspberry Pi")
     reset_adapter()
     logging.debug("adapter: sending open command")
     _send_command(CommandType.OPEN, 0)
