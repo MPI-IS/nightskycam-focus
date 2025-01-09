@@ -13,8 +13,8 @@ except RuntimeError:
 
 import spidev
 
-MIN_FOCUS = 350
-MAX_FOCUS = 650
+MIN_FOCUS = 1
+MAX_FOCUS = 3071
 
 
 class _Wait(Enum):

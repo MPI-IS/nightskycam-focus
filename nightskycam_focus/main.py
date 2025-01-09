@@ -10,7 +10,14 @@ from camera_zwo_asi import ImageType
 from camera_zwo_asi.camera import Camera
 from camera_zwo_asi.image import Image
 
-from .adapter import adapter, set_focus, set_aperture, Aperture
+from .adapter import (
+    adapter,
+    set_focus,
+    set_aperture,
+    Aperture,
+    MIN_FOCUS,
+    MAX_FOCUS,
+)
 from .focus import find_focus
 
 
@@ -197,8 +204,10 @@ def zwo_asi_focus_test():
         logging.info("adapter running")
 
 
-def _check_range(value: int, minimum: int = 350, maximum: int = 650) -> int:
-    """Check if the input value is an integer within the range 350 to 650."""
+def _check_range(
+    value: int, minimum: int = MIN_FOCUS, maximum: int = MAX_FOCUS
+) -> int:
+    """Check if the input value is an integer within the valid range."""
     try:
         ivalue = int(value)
     except ValueError:
@@ -227,7 +236,7 @@ def zwo_asi_focus():
     parser.add_argument(
         "focus",
         type=_check_range,
-        help="desired focus. int between 350 and 650",
+        help=f"desired focus. int between {MIN_FOCUS} and {MAX_FOCUS}",
     )
     parser.add_argument(
         "--aperture",
