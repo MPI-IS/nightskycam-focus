@@ -1,3 +1,4 @@
+from typing import Tuple
 import logging
 import time
 from contextlib import contextmanager
@@ -108,11 +109,12 @@ def _prepare_message(command: int, v1: int, v2: int) -> List[int]:
 
 _RESET_MESSAGE = _prepare_message(0x00, 0x00, 0x00)
 _ERROR_RESET = (2, 2, 2, 2)
+_ERROR_RESPONSE = (0, 0, 0, 0)
 
 
 def _spi_send(
     spi: spidev.SpiDev, command_type: CommandType, value: int
-) -> None:
+) -> Tuple[int, int, int, int]:
     logging.debug(f"command {command_type}: {value}")
     v1, v2 = divmod(value, 256)
     command = ord(command_type.value)
@@ -121,6 +123,7 @@ def _spi_send(
     logging.debug(f"command message: {message}")
     resp = spi.xfer3(message)
     logging.debug(f"response: {resp}")
+    return resp
 
 
 def _send_command(
@@ -129,7 +132,10 @@ def _send_command(
     attempt = 1
     while attempt < max_attempts:
         with _gpio() as spi:
-            _spi_send(spi, command_type, value)
+            response = _spi_send(spi, command_type, value)
+            if response == _ERROR_RESPONSE:
+                logging.error(f"received invalid response: {response}")
+                continue
             if command_type in (CommandType.FOCUS, CommandType.APERTURE):
                 time.sleep(_Wait.SHORT.value)
                 reset_resp = spi.xfer3(_RESET_MESSAGE)
