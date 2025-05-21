@@ -1,3 +1,4 @@
+from typing import Optional
 from typing import Tuple
 import logging
 import time
@@ -13,6 +14,7 @@ except RuntimeError:
     _GPIO_IMPORTED = False
 
 import spidev
+
 
 MIN_FOCUS = 1
 MAX_FOCUS = 3071
@@ -60,8 +62,10 @@ class Aperture(Enum):
 PIN = NewType("PIN", int)
 SS_PIN = PIN(5)
 RESET_PIN = PIN(6)
-
 _SPI_MAX_HZ: int = 1000000
+_ERROR_RESET = (2, 2, 2, 2)
+_ERROR_RESPONSE = (0, 0, 0, 0)
+_ERROR_RESPONSES = (_ERROR_RESET, _ERROR_RESPONSE)
 
 
 @contextmanager
@@ -81,10 +85,6 @@ def _gpio() -> Generator[spidev.SpiDev, None, None]:
         GPIO.output(SS_PIN, GPIO.HIGH)
         spi.close()
         GPIO.cleanup()
-
-
-def _send_spi_data(spi: spidev.SpiDev, data: List[int]) -> List[int]:
-    return spi.xfer3(data)
 
 
 def _crc8_custom(data: List[int]) -> int:
@@ -108,12 +108,14 @@ def _prepare_message(command: int, v1: int, v2: int) -> List[int]:
 
 
 _RESET_MESSAGE = _prepare_message(0x00, 0x00, 0x00)
-_ERROR_RESET = (2, 2, 2, 2)
-_ERROR_RESPONSE = (0, 0, 0, 0)
 
 
 def _spi_send(
-    spi: spidev.SpiDev, command_type: CommandType, value: int
+    spi: spidev.SpiDev,
+    command_type: CommandType,
+    value: int,
+    sleep: Optional[_Wait],
+    reset: bool,
 ) -> Tuple[int, int, int, int]:
     logging.debug(f"command {command_type}: {value}")
     v1, v2 = divmod(value, 256)
@@ -121,36 +123,41 @@ def _spi_send(
     message = _prepare_message(command, v1, v2)
     GPIO.output(SS_PIN, GPIO.LOW)
     logging.debug(f"command message: {message}")
-    resp = spi.xfer3(message)
-    logging.debug(f"response: {resp}")
-    return resp
+    response = spi.xfer3(message)
+    logging.debug(f"response: {response}")
+    if response in _ERROR_RESPONSES:
+        raise RuntimeError(f"received invalid response: {response}")
+    if reset:
+        time.sleep(_Wait.SHORT.value)
+        reset_resp = spi.xfer3(_RESET_MESSAGE)
+    if reset_resp in _ERROR_RESPONSES:
+        raise RuntimeError(f"received invalid response: {response}")
+    if sleep:
+        time.sleep(sleep.value)
+    return response
 
 
-def _send_command(
-    command_type: CommandType, value: int, max_attempts: int = 10
+def _command(
+    spi: spidev.SpiDev, command_type: CommandType, value: int
 ) -> None:
-    attempt = 1
-    while attempt < max_attempts:
-        with _gpio() as spi:
-            response = _spi_send(spi, command_type, value)
-            if response == _ERROR_RESPONSE:
-                logging.error(f"received invalid response: {response}")
-                continue
-            if command_type in (CommandType.FOCUS, CommandType.APERTURE):
-                time.sleep(_Wait.SHORT.value)
-                reset_resp = spi.xfer3(_RESET_MESSAGE)
-                logging.debug(f"reset response: {reset_resp}")
-                if reset_resp != _ERROR_RESET:
-                    return
-            elif command_type == CommandType.OPEN:
-                time.sleep(_Wait.LONG.value)
-                return
-            elif command_type == CommandType.IDLE:
-                return
-            attempt += 1
+    with _gpio() as spi:
+        _spi_send(spi, command_type, value)
 
-    error_message = f"failed to run command: '{command_type.value}: {value}'"
-    raise RuntimeError(error_message)
+
+def _aperture_command(value: int):
+    _command(CommandType.APERTURE, value, None, True)
+
+
+def _focus_command(value: int):
+    _command(CommandType.FOCUS, value, None, True)
+
+
+def _open_command():
+    _command(CommandType.OPEN, 0, _Wait.LONG, False)
+
+
+def _idle_command():
+    _command(CommandType.OPEN, 0, None, False)
 
 
 def reset_adapter() -> None:
@@ -175,12 +182,8 @@ def init_adapter() -> None:
         raise RuntimeError("GPIO module can be used only on Raspberry Pi")
     reset_adapter()
     logging.debug("adapter: sending open command")
-    _send_command(CommandType.OPEN, 0)
+    _open_command()
     logging.debug("adapter: open command sent")
-
-
-def idle_adapter() -> None:
-    _send_command(CommandType.IDLE, 0)
 
 
 @contextmanager
@@ -193,17 +196,21 @@ def adapter():
         error = e
     finally:
         logging.debug("adapter: sending idle command")
-        idle_adapter()
+        _idle_command()
         logging.debug("adapter: idle command sent")
     if error:
         logging.error(error)
         raise error
 
 
-def set_focus(target_value: int) -> None:
-    _send_command(CommandType.FOCUS, target_value)
+def set_focus(value: int) -> None:
+    if value < MIN_FOCUS or value > MAX_FOCUS:
+        raise ValueError(
+            f"focus should be between {MIN_FOCUS} and {MAX_FOCUS} ({value} invalid)"
+        )
+    _focus_command(value)
 
 
-def set_aperture(target_value: Aperture) -> None:
-    value: int = target_value.value
-    _send_command(CommandType.APERTURE, value)
+def set_aperture(value: Aperture) -> None:
+    value: int = value.value
+    _aperture_command(value)
