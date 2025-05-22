@@ -129,10 +129,10 @@ def _spi_send(
     v1, v2 = divmod(value, 256)
     command = ord(command_type.value)
     message = _prepare_message(command, v1, v2)
-    GPIO.output(SS_PIN, GPIO.LOW)
-    
+
     logging.debug(f"command message: {message}")
     with _gpio() as spi:
+        GPIO.output(SS_PIN, GPIO.LOW)
         response = spi.xfer3(message)
         logging.debug(f"response: {response}")
         if response in _ERROR_RESPONSES:
@@ -144,7 +144,7 @@ def _spi_send(
             raise RuntimeError(f"received invalid response: {response}")
         if sleep:
             time.sleep(sleep.value)
-            
+
     return response
 
 
@@ -180,7 +180,7 @@ def reset_adapter() -> None:
     logging.debug("adapter reset")
     time.sleep(_Wait.SHORT.value)
 
-    
+
 @contextmanager
 def adapter():
     if not _GPIO_IMPORTED:
