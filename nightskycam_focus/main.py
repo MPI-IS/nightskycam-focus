@@ -1,12 +1,21 @@
 import argparse
 import logging
+import sys
+
 from pathlib import Path
 
 from camera_zwo_asi import ImageType
 from camera_zwo_asi.camera import Camera
 from camera_zwo_asi.image import Image
 
-from .adapter import MAX_FOCUS, MIN_FOCUS, Aperture, adapter, set_aperture, set_focus
+from .adapter import (
+    MAX_FOCUS,
+    MIN_FOCUS,
+    Aperture,
+    adapter,
+    set_aperture,
+    set_focus,
+)
 
 
 def _capture(exposure: int, gain: int, camera_index: int) -> Image:
@@ -22,11 +31,17 @@ def _capture(exposure: int, gain: int, camera_index: int) -> Image:
 
 def zwo_asi_focus_test():
     logging.basicConfig(level=logging.DEBUG, format="focus test: %(message)s")
-    with adapter():
-        logging.info("adapter running")
+    try:
+        with adapter():
+            logging.info("adapter running")
+    except Exception as e:
+        logging.error(f"command failed with error: {e}")
+        sys.exit(1)
 
 
-def _check_range(value: int, minimum: int = MIN_FOCUS, maximum: int = MAX_FOCUS) -> int:
+def _check_range(
+    value: int, minimum: int = MIN_FOCUS, maximum: int = MAX_FOCUS
+) -> int:
     """Check if the input value is an integer within the valid range."""
     try:
         ivalue = int(value)
@@ -71,20 +86,24 @@ def zwo_asi_focus():
         required=False,
     )
     args = parser.parse_args()
-    with adapter():
-        logging.info(f"setting focus to {args.focus}")
-        set_focus(args.focus)
-        if args.aperture is not None:
-            logging.info(f"setting aperture to {args.aperture}")
-            set_aperture(args.aperture)
-    if args.exposure is None:
-        return
-    logging.info(f"taking picture with exposure {args.exposure}")
-    image = _capture(args.exposure, 121, 0)
-    if args.aperture:
-        filename = f"img_{args.focus}_{args.aperture}_{args.exposure}.tiff"
-    else:
-        filename = f"img_{args.focus}_{args.exposure}.tiff"
-    filepath = str(Path.cwd() / filename)
-    logging.info(f"saving image to {filepath}")
-    image.save(filepath)
+    try:
+        with adapter():
+            logging.info(f"setting focus to {args.focus}")
+            set_focus(args.focus)
+            if args.aperture is not None:
+                logging.info(f"setting aperture to {args.aperture}")
+                set_aperture(args.aperture)
+        if args.exposure is None:
+            return
+        logging.info(f"taking picture with exposure {args.exposure}")
+        image = _capture(args.exposure, 121, 0)
+        if args.aperture:
+            filename = f"img_{args.focus}_{args.aperture}_{args.exposure}.tiff"
+        else:
+            filename = f"img_{args.focus}_{args.exposure}.tiff"
+        filepath = str(Path.cwd() / filename)
+        logging.info(f"saving image to {filepath}")
+        image.save(filepath)
+    except Exception as e:
+        logging.error(f"command failed with error: {e}")
+        sys.exit(1)
