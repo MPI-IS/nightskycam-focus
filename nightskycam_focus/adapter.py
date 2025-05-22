@@ -70,18 +70,26 @@ _ERROR_RESPONSES = (_ERROR_RESET, _ERROR_RESPONSE)
 
 @contextmanager
 def _gpio() -> Generator[spidev.SpiDev, None, None]:
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(SS_PIN, GPIO.OUT)
-    GPIO.output(SS_PIN, GPIO.HIGH)
-    spi = spidev.SpiDev()
-    spi.open(0, 0)
-    spi.max_speed_hz = _SPI_MAX_HZ
+    logging.debug("opening gpio / spidev")
     try:
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(SS_PIN, GPIO.OUT)
+        GPIO.output(SS_PIN, GPIO.HIGH)
+        spi = spidev.SpiDev()
+        spi.open(0, 0)
+        spi.max_speed_hz = _SPI_MAX_HZ
         yield spi
-    except KeyboardInterrupt:
+    except Exception as e:
+        logging.error(f"gpio / spidev error: {e}")
+        try:
+            GPIO.output(SS_PIN, GPIO.HIGH)
+        except:
+            pass
         spi.close()
         GPIO.cleanup()
-    else:
+        raise e
+    finally:
+        logging.debug("closing gpio / spidev")
         GPIO.output(SS_PIN, GPIO.HIGH)
         spi.close()
         GPIO.cleanup()
@@ -111,53 +119,49 @@ _RESET_MESSAGE = _prepare_message(0x00, 0x00, 0x00)
 
 
 def _spi_send(
-    spi: spidev.SpiDev,
     command_type: CommandType,
     value: int,
     sleep: Optional[_Wait],
     reset: bool,
 ) -> Tuple[int, int, int, int]:
+
     logging.debug(f"command {command_type}: {value}")
     v1, v2 = divmod(value, 256)
     command = ord(command_type.value)
     message = _prepare_message(command, v1, v2)
     GPIO.output(SS_PIN, GPIO.LOW)
+    
     logging.debug(f"command message: {message}")
-    response = spi.xfer3(message)
-    logging.debug(f"response: {response}")
-    if response in _ERROR_RESPONSES:
-        raise RuntimeError(f"received invalid response: {response}")
-    if reset:
-        time.sleep(_Wait.SHORT.value)
-        reset_resp = spi.xfer3(_RESET_MESSAGE)
-    if reset_resp in _ERROR_RESPONSES:
-        raise RuntimeError(f"received invalid response: {response}")
-    if sleep:
-        time.sleep(sleep.value)
+    with _gpio() as spi:
+        response = spi.xfer3(message)
+        logging.debug(f"response: {response}")
+        if response in _ERROR_RESPONSES:
+            raise RuntimeError(f"received invalid response: {response}")
+        if reset:
+            time.sleep(_Wait.SHORT.value)
+            reset_resp = spi.xfer3(_RESET_MESSAGE)
+        if reset_resp in _ERROR_RESPONSES:
+            raise RuntimeError(f"received invalid response: {response}")
+        if sleep:
+            time.sleep(sleep.value)
+            
     return response
 
 
-def _command(
-    spi: spidev.SpiDev, command_type: CommandType, value: int
-) -> None:
-    with _gpio() as spi:
-        _spi_send(spi, command_type, value)
-
-
 def _aperture_command(value: int):
-    _command(CommandType.APERTURE, value, None, True)
+    _spi_send(CommandType.APERTURE, value, None, True)
 
 
 def _focus_command(value: int):
-    _command(CommandType.FOCUS, value, None, True)
+    _spi_send(CommandType.FOCUS, value, None, True)
 
 
 def _open_command():
-    _command(CommandType.OPEN, 0, _Wait.LONG, False)
+    _spi_send(CommandType.OPEN, 0, _Wait.LONG, False)
 
 
 def _idle_command():
-    _command(CommandType.OPEN, 0, None, False)
+    _spi_send(CommandType.OPEN, 0, None, False)
 
 
 def reset_adapter() -> None:
@@ -176,19 +180,15 @@ def reset_adapter() -> None:
     logging.debug("adapter reset")
     time.sleep(_Wait.SHORT.value)
 
-
-def init_adapter() -> None:
+    
+@contextmanager
+def adapter():
     if not _GPIO_IMPORTED:
         raise RuntimeError("GPIO module can be used only on Raspberry Pi")
     reset_adapter()
     logging.debug("adapter: sending open command")
     _open_command()
     logging.debug("adapter: open command sent")
-
-
-@contextmanager
-def adapter():
-    init_adapter()
     try:
         yield
         error = None
@@ -212,5 +212,5 @@ def set_focus(value: int) -> None:
 
 
 def set_aperture(value: Aperture) -> None:
-    value: int = value.value
-    _aperture_command(value)
+    value_: int = value.value
+    _aperture_command(value_)
