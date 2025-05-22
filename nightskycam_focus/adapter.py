@@ -74,7 +74,7 @@ def _gpio() -> Generator[spidev.SpiDev, None, None]:
     try:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(SS_PIN, GPIO.OUT)
-        GPIO.output(SS_PIN, GPIO.HIGH)
+        GPIO.output(SS_PIN, GPIO.LOW)
         spi = spidev.SpiDev()
         spi.open(0, 0)
         spi.max_speed_hz = _SPI_MAX_HZ
@@ -185,7 +185,7 @@ def reset_adapter() -> None:
 def adapter():
     if not _GPIO_IMPORTED:
         raise RuntimeError("GPIO module can be used only on Raspberry Pi")
-    reset_adapter()
+    # reset_adapter()
     logging.debug("adapter: sending open command")
     _open_command()
     logging.debug("adapter: open command sent")
