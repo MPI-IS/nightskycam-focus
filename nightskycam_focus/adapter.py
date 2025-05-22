@@ -88,7 +88,7 @@ def _gpio() -> Generator[spidev.SpiDev, None, None]:
         spi.close()
         GPIO.cleanup()
         raise e
-    finally:
+    else:
         logging.debug("closing gpio / spidev")
         GPIO.output(SS_PIN, GPIO.HIGH)
         spi.close()
