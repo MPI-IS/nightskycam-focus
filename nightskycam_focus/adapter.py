@@ -1,10 +1,10 @@
-from typing import Optional
-from typing import Tuple
 import logging
 import time
 from contextlib import contextmanager
 from enum import Enum
-from typing import Generator, List, NewType
+from warnings import warn
+
+import spidev
 
 try:
     import RPi.GPIO as GPIO
@@ -13,23 +13,20 @@ try:
 except RuntimeError:
     _GPIO_IMPORTED = False
 
-import spidev
-
+logger = logging.getLogger(__name__)
 
 MIN_FOCUS = 1
 MAX_FOCUS = 3071
+SS_PIN = 5
+RESET_PIN = 6
+MAX_SPEED_HZ = 1000000
+SLEEP = 0.1
+MIDDLE_SLEEP = 2.0
+LONG_SLEEP = 5.0
 
 
-class _Wait(Enum):
-    VERY_SHORT = 0.5
-    SHORT = 0.6
-    REGULAR = 1.0
-    LONG = 5.0
-
-
-class CommandType(Enum):
+class _CommandType(Enum):
     OPEN = "O"
-    IDLE = "I"
     FOCUS = "F"
     APERTURE = "A"
 
@@ -59,45 +56,7 @@ class Aperture(Enum):
         return cls.__members__[aperture]
 
 
-PIN = NewType("PIN", int)
-SS_PIN = PIN(5)
-RESET_PIN = PIN(6)
-_SPI_MAX_HZ: int = 1000000
-_ERROR_RESET = (2, 2, 2, 2)
-_ERROR_RESPONSE = (0, 0, 0, 0)
-#_ERROR_RESPONSES = (_ERROR_RESET, _ERROR_RESPONSE)
-_ERROR_RESPONSES = (_ERROR_RESET,)
-
-
-@contextmanager
-def _gpio() -> Generator[spidev.SpiDev, None, None]:
-    logging.debug("opening gpio / spidev")
-    try:
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(SS_PIN, GPIO.OUT)
-        # Keep SS high when idle, align with reference implementation
-        GPIO.output(SS_PIN, GPIO.HIGH)
-        spi = spidev.SpiDev()
-        spi.open(0, 0)
-        spi.max_speed_hz = _SPI_MAX_HZ
-        yield spi
-    except Exception as e:
-        logging.error(f"gpio / spidev error: {e}")
-        try:
-            GPIO.output(SS_PIN, GPIO.HIGH)
-        except:
-            pass
-        spi.close()
-        GPIO.cleanup()
-        raise e
-    else:
-        logging.debug("closing gpio / spidev")
-        GPIO.output(SS_PIN, GPIO.HIGH)
-        spi.close()
-        GPIO.cleanup()
-
-
-def _crc8_custom(data: List[int]) -> int:
+def _crc8_custom(data):
     crc = 0x00
     for byte in data:
         crc ^= byte
@@ -106,114 +65,107 @@ def _crc8_custom(data: List[int]) -> int:
                 crc = ((crc << 1) ^ 0x05) & 0xFF
             else:
                 crc <<= 1
-        crc &= 0xFF
+            crc &= 0xFF
+
     return crc
 
 
-def _prepare_message(command: int, v1: int, v2: int) -> List[int]:
-    d = [command, v1, v2]
-    crc = _crc8_custom(d)
-    d.append(crc)
-    return d
+@contextmanager
+def _closing(spi: spidev.SpiDev):
+    try:
+        yield
+    finally:
+        logger.debug("closing adapter")
+        spi.close()
+        GPIO.cleanup()
+        logger.debug("adapter closed")
 
 
-_RESET_MESSAGE = _prepare_message(0x00, 0x00, 0x00)
+def _send_command(command_type: _CommandType, value: int):
 
+    value1, value2 = divmod(value, 256)
 
-def _spi_send(
-    command_type: CommandType,
-    value: int,
-    sleep: Optional[_Wait],
-    reset: bool,
-) -> Tuple[int, int, int, int]:
-    logging.debug(f"command {command_type}: {value}")
-    v1, v2 = divmod(value, 256)
-    command = ord(command_type.value)
-    message = _prepare_message(command, v1, v2)
-
-    logging.debug(f"command message: {message}")
-    with _gpio() as spi:
-        # Assert SS low just for the transfer
-        GPIO.output(SS_PIN, GPIO.LOW)
-        response = tuple(spi.xfer3(message))
-        GPIO.output(SS_PIN, GPIO.HIGH)
-        logging.debug(f"response: {response}")
-        if response in _ERROR_RESPONSES:
-            raise RuntimeError(f"received invalid response: {response}")
-        if reset:
-            # Align with reference: wait about 1.5 seconds before reset transfer
-            time.sleep(1.5)
-            GPIO.output(SS_PIN, GPIO.LOW)
-            reset_resp = tuple(spi.xfer3(_RESET_MESSAGE))
-            GPIO.output(SS_PIN, GPIO.HIGH)
-            if reset_resp in _ERROR_RESPONSES:
-                raise RuntimeError(f"received invalid response: {reset_resp}")
-        if sleep:
-            time.sleep(sleep.value)
-
-    return response
-
-
-def _aperture_command(value: int):
-    _spi_send(CommandType.APERTURE, value, None, True)
-
-
-def _focus_command(value: int):
-    _spi_send(CommandType.FOCUS, value, None, True)
-
-
-def _open_command():
-    _spi_send(CommandType.OPEN, 0, _Wait.LONG, False)
-
-
-def _idle_command():
-    _spi_send(CommandType.IDLE, 0, None, False)
-
-
-def reset_adapter() -> None:
-    logging.debug("resetting adapter")
-    logging.debug("GPIO set mode")
+    logger.debug("opening adapter")
     GPIO.setmode(GPIO.BCM)
-    logging.debug("GPIO setup")
+    GPIO.setup(SS_PIN, GPIO.OUT)
+    GPIO.output(SS_PIN, GPIO.HIGH)
+    spi = spidev.SpiDev()
+    spi.open(0, 0)
+    logger.debug("adapter opened")
+
+    spi.max_speed_hz = MAX_SPEED_HZ
+    command = ord(command_type.value)
+    data_to_send1 = [command, value1, value2]
+    crc1 = _crc8_custom(data_to_send1)
+    data_to_send1.append(crc1)
+
+    with _closing(spi):
+
+        logger.debug(f"setting pin {SS_PIN} to low")
+        GPIO.output(SS_PIN, GPIO.LOW)
+
+        resp = spi.xfer3(data_to_send1)
+        logger.debug(f"sent: {data_to_send1}, received: {resp}")
+
+        if command_type in (_CommandType.FOCUS, _CommandType.APERTURE):
+            command_r = 0x00
+            value1_r = 0x00
+            value2_r = 0x00
+            time.sleep(1)
+            data_to_send2 = [command_r, value1_r, value2_r]
+            crc2 = _crc8_custom(data_to_send2)
+            data_to_send2.append(crc2)
+            resp = spi.xfer3(data_to_send2)
+            logger.debug(f"sent: {data_to_send2}, received: {resp}")
+
+        if command_type == _CommandType.OPEN:
+            time.sleep(LONG_SLEEP)
+
+        logger.debug(f"setting pin {SS_PIN} to high")
+        GPIO.output(SS_PIN, GPIO.HIGH)
+
+
+def _reset():
+    logger.debug("resetting adapter")
+    GPIO.setmode(GPIO.BCM)
+    logger.debug(f"setting pin {RESET_PIN} to out")
     GPIO.setup(RESET_PIN, GPIO.OUT)
     try:
-        logging.debug("GPIO output")
+        logger.debug(f"setting pin {RESET_PIN} to low")
         GPIO.output(RESET_PIN, GPIO.LOW)
-        time.sleep(_Wait.VERY_SHORT.value)
+        time.sleep(SLEEP)
     finally:
-        logging.debug("GPIO cleanup")
+        logger.debug("gpio cleanup")
         GPIO.cleanup()
-    logging.debug("adapter reset")
-    time.sleep(_Wait.SHORT.value)
+    logger.debug("adapter reset")
+
+
+def set(focus: int, aperture: Aperture):
+    if not _GPIO_IMPORTED:
+        raise RuntimeError("GPIO module can be used only on Raspberry Pi")
+    if focus < MIN_FOCUS or focus > MAX_FOCUS:
+        raise ValueError(
+            f"focus should be between {MIN_FOCUS} and {MAX_FOCUS} ({focus} invalid)"
+        )
+    _reset()
+    time.sleep(MIDDLE_SLEEP)
+    _send_command(_CommandType.OPEN, 0)
+    time.sleep(MIDDLE_SLEEP)
+    _send_command(_CommandType.APERTURE, aperture.value)
+    time.sleep(MIDDLE_SLEEP)
+    _send_command(_CommandType.FOCUS, focus)
+    time.sleep(MIDDLE_SLEEP)
+    _reset()
+    logger.info(f"set focus to {focus} and aperture to {aperture}")
+
+
+def set_focus(value: int):
+    set(value, Aperture.MAX)
 
 
 @contextmanager
 def adapter():
-    if not _GPIO_IMPORTED:
-        raise RuntimeError("GPIO module can be used only on Raspberry Pi")
-    # Do not send OPEN on entry by default; align with reference minimal program
-    try:
-        yield
-        error = None
-    except Exception as e:
-        error = e
-    finally:
-        logging.debug("adapter: sending idle command")
-        _idle_command()
-        logging.debug("adapter: idle command sent")
-    if error:
-        logging.error(error)
-        raise error
-
-
-def set_focus(value: int) -> None:
-    if value < MIN_FOCUS or value > MAX_FOCUS:
-        raise ValueError(
-            f"focus should be between {MIN_FOCUS} and {MAX_FOCUS} ({value} invalid)"
-        )
-    _focus_command(value)
-
-
-def set_aperture(value: Aperture) -> None:
-    value_: int = value.value
-    _aperture_command(value_)
+    warn(
+        'The focus/aperture context manager "adapter" is deprecated. Call "set" or "set_focus" directly.'
+    )
+    yield
