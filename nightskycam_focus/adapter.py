@@ -10,7 +10,7 @@ try:
     import RPi.GPIO as GPIO
 
     _GPIO_IMPORTED = True
-except RuntimeError:
+except (RuntimeError, ModuleNotFoundError):
     _GPIO_IMPORTED = False
 
 logger = logging.getLogger(__name__)

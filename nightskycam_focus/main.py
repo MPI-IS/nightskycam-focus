@@ -72,11 +72,6 @@ def zwo_asi_focus():
     try:
         if args.aperture is None:
             aperture = adapter.Aperture.MAX
-        else:
-            try:
-                aperture = adapter.Aperture.get(str(args.aperture))
-            except Exception as e:
-                raise ValueError(f"Aperture {args.aperture} is not a valid aperture value: {e}")
         logger.info(f"setting focus to {args.focus} and aperture to {aperture}")
         adapter.set(args.focus, aperture)
         if args.exposure is None:
