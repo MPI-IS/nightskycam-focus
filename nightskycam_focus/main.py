@@ -1,13 +1,15 @@
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 from camera_zwo_asi import ImageType
 from camera_zwo_asi.camera import Camera
 from camera_zwo_asi.image import Image
 
-from .adapter import MAX_FOCUS, MIN_FOCUS, Aperture, adapter, set_aperture, set_focus
+from . import adapter
 
+logger = logging.getLogger(__name__)
 
 def _capture(exposure: int, gain: int, camera_index: int) -> Image:
     camera = Camera(camera_index)
@@ -20,13 +22,9 @@ def _capture(exposure: int, gain: int, camera_index: int) -> Image:
     return camera.capture()
 
 
-def zwo_asi_focus_test():
-    logging.basicConfig(level=logging.DEBUG, format="focus test: %(message)s")
-    with adapter():
-        logging.info("adapter running")
-
-
-def _check_range(value: int, minimum: int = MIN_FOCUS, maximum: int = MAX_FOCUS) -> int:
+def _check_range(
+    value: int, minimum: int = adapter.MIN_FOCUS, maximum: int = adapter.MAX_FOCUS
+) -> int:
     """Check if the input value is an integer within the valid range."""
     try:
         ivalue = int(value)
@@ -39,9 +37,9 @@ def _check_range(value: int, minimum: int = MIN_FOCUS, maximum: int = MAX_FOCUS)
     return ivalue
 
 
-def _valid_aperture(value: str) -> Aperture:
+def _valid_aperture(value: str) -> adapter.Aperture:
     try:
-        return Aperture.get(value)
+        return adapter.Aperture.get(value)
     except KeyError:
         raise argparse.ArgumentTypeError(
             f"{value} is not a valid aperture. Valid apertures: MAX (open), V1, ..., V10, MIN (closed)"
@@ -56,7 +54,7 @@ def zwo_asi_focus():
     parser.add_argument(
         "focus",
         type=_check_range,
-        help=f"desired focus. int between {MIN_FOCUS} and {MAX_FOCUS}",
+        help=f"desired focus. int between {adapter.MIN_FOCUS} and {adapter.MAX_FOCUS}",
     )
     parser.add_argument(
         "--aperture",
@@ -71,20 +69,24 @@ def zwo_asi_focus():
         required=False,
     )
     args = parser.parse_args()
-    with adapter():
-        logging.info(f"setting focus to {args.focus}")
-        set_focus(args.focus)
-        if args.aperture is not None:
-            logging.info(f"setting aperture to {args.aperture}")
-            set_aperture(args.aperture)
-    if args.exposure is None:
-        return
-    logging.info(f"taking picture with exposure {args.exposure}")
-    image = _capture(args.exposure, 121, 0)
-    if args.aperture:
-        filename = f"img_{args.focus}_{args.aperture}_{args.exposure}.tiff"
-    else:
-        filename = f"img_{args.focus}_{args.exposure}.tiff"
-    filepath = str(Path.cwd() / filename)
-    logging.info(f"saving image to {filepath}")
-    image.save(filepath)
+    try:
+        if args.aperture is None:
+            aperture = adapter.Aperture.MAX
+        else:
+            aperture = args.aperture
+        logger.info(f"setting focus to {args.focus} and aperture to {aperture}")
+        adapter.set(args.focus, aperture)
+        if args.exposure is None:
+            return
+        logging.info(f"taking picture with exposure {args.exposure}")
+        image = _capture(args.exposure, 121, 0)
+        if args.aperture:
+            filename = f"img_{args.focus}_{args.aperture}_{args.exposure}.tiff"
+        else:
+            filename = f"img_{args.focus}_{args.exposure}.tiff"
+        filepath = str(Path.cwd() / filename)
+        logging.info(f"saving image to {filepath}")
+        image.save(filepath)
+    except Exception as e:
+        logging.error(f"command failed with error: {e}")
+        sys.exit(1)

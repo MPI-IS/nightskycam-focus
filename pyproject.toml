@@ -1,12 +1,11 @@
 [tool.poetry]
 name = "nightskycam-focus"
-version = "0.1.7"
+version = "0.1.8"
 description = "focusing nightskycam zwo-asi cameras"
 authors = ["Vincent Berenz <vberenz@tuebingen.mpg.de>"]
 packages = [{ include = "nightskycam_focus" }]
 
 [tool.poetry.scripts]
-zwo-asi-focus-test = 'nightskycam_focus.main:zwo_asi_focus_test'
 zwo-asi-focus = 'nightskycam_focus.main:zwo_asi_focus'
 
 [tool.poetry.dependencies]
