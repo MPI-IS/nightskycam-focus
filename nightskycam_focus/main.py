@@ -9,6 +9,7 @@ from camera_zwo_asi.image import Image
 
 from . import adapter
 
+logger = logging.getLogger(__name__)
 
 def _capture(exposure: int, gain: int, camera_index: int) -> Image:
     camera = Camera(camera_index)
