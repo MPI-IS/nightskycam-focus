@@ -22,16 +22,6 @@ def _capture(exposure: int, gain: int, camera_index: int) -> Image:
     return camera.capture()
 
 
-def zwo_asi_focus_test():
-    logging.basicConfig(level=logging.DEBUG, format="focus test: %(message)s")
-    try:
-        with adapter():
-            logging.info("adapter running")
-    except Exception as e:
-        logging.error(f"command failed with error: {e}")
-        sys.exit(1)
-
-
 def _check_range(
     value: int, minimum: int = adapter.MIN_FOCUS, maximum: int = adapter.MAX_FOCUS
 ) -> int:
@@ -83,7 +73,10 @@ def zwo_asi_focus():
         if args.aperture is None:
             aperture = adapter.Aperture.MAX
         else:
-            aperture = adapter.Aperture.get(str(args.aperture))
+            try:
+                aperture = adapter.Aperture.get(str(args.aperture))
+            except Exception as e:
+                raise ValueError(f"Aperture {args.aperture} is not a valid aperture value: {e}")
         logger.info(f"setting focus to {args.focus} and aperture to {aperture}")
         adapter.set(args.focus, aperture)
         if args.exposure is None:
