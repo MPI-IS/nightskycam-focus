@@ -72,6 +72,8 @@ def zwo_asi_focus():
     try:
         if args.aperture is None:
             aperture = adapter.Aperture.MAX
+        else:
+            aperture = args.aperture
         logger.info(f"setting focus to {args.focus} and aperture to {aperture}")
         adapter.set(args.focus, aperture)
         if args.exposure is None:
